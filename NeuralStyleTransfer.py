@@ -34,8 +34,9 @@ print("Eager execution: {}".format(tf.executing_eagerly()))
 
 # Set up some global values here
 #content_path = 'Green_Sea_Turtle_grazing_seagrass.jpg'
-content_path = 'photo.jpg'
-style_path = 'painting.png'
+content_path = '13921 Holyoke.jpg'
+#style_path = 'painting.png'
+style_path = 'paintings\Alfred_Sisley\Alfred_Sisley_168.jpg'
 
 # Content layer where will pull our feature maps
 content_layers = ['block5_conv2'] 
@@ -54,6 +55,9 @@ num_style_layers = len(style_layers)
 def load_img(path_to_img):
   max_dim = 512
   img = Image.open(path_to_img)
+  #open_cv_image = np.array(img)
+  #open_cv_image = cv2.cvtColor(open_cv_image,cv2.COLOR_RGB2LAB)
+  #img = Image.fromarray(open_cv_image)
   long = max(img.size)
   scale = max_dim/long
   img = img.resize((round(img.size[0]*scale), round(img.size[1]*scale)), Image.ANTIALIAS)
@@ -213,7 +217,8 @@ def compute_loss(model, loss_weights, init_image, gram_style_features, content_f
   content_score *= content_weight
 
   # Get total loss
-  loss = style_score + content_score 
+  loss = style_score*5 + content_score 
+  loss += tf.image.total_variation(init_image)[0] * 0.01 # at 1x the smallest texture is 2x2 pixels
   return loss, style_score, content_score
 
 def compute_grads(cfg):
@@ -227,7 +232,7 @@ def compute_grads(cfg):
 
 def run_style_transfer(content_path, 
                        style_path,
-                       num_iterations=1000,
+                       num_iterations=5000,
                        content_weight=1e3, 
                        style_weight=1e-2): 
   # We don't need to (or want to) train any layers of our model, so we set their
@@ -296,7 +301,9 @@ def run_style_transfer(content_path,
       plot_img = init_image.numpy()
       plot_img = deprocess_img(plot_img)
       imgs.append(plot_img)
+      plot_img = cv2.cvtColor(plot_img, cv2.COLOR_RGB2BGR)
       cv2.imwrite("output.jpg", plot_img)
+      #Image.save("output.jpg")
       #IPython.display.clear_output(wait=True)
       #IPython.display.display_png(Image.fromarray(plot_img))
       print('Iteration: {}'.format(i))        
@@ -315,7 +322,7 @@ def run_style_transfer(content_path,
       
   return best_img, best_loss 
 
-#def show_results(best_img, content_path, style_path, show_large_final=True):
+# def show_results(best_img, content_path, style_path, show_large_final=True):
 #   plt.figure(figsize=(10, 5))
 #   content = load_img(content_path) 
 #   style = load_img(style_path)
@@ -334,9 +341,13 @@ def run_style_transfer(content_path,
 #     plt.show()
 
 def main():
-    best, best_loss = run_style_transfer(content_path, style_path, num_iterations=1000)
-    Image.fromarray(best)
-    show_results(best, content_path, style_path)
+    best, best_loss = run_style_transfer(content_path, style_path, num_iterations=5000)
+    #init_image = Image.fromarray(best)
+    #plot_img = init_image.numpy()
+    #plot_img = deprocess_img(plot_img)
+    #plot_img = cv2.cvtColor(plot_img, cv2.COLOR_RGB2BGR)
+    #cv2.imwrite("best_output.jpg", plot_img)
+    #show_results(best, content_path, style_path)
 
 if __name__ == "__main__":
     main()
