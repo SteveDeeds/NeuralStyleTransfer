@@ -1,23 +1,23 @@
-import functools
-import time
 import os
 
-import cv2
 import numpy as np
 import tensorflow as tf
 from PIL import Image
 from tensorflow.python.keras import backend as K
-from tensorflow.python.keras import layers, losses, models
-from tensorflow.python.keras.preprocessing import image as kp_image
 from keras.preprocessing.image import ImageDataGenerator
-from keras.layers import Dense, GlobalAveragePooling2D, Input
+from keras.layers import Dense, Input
 from keras.models import Model
 from tensorflow.keras.models import load_model
 
 batch_size = 64
-img_height = 512
-img_width = 512
+img_height = 64
+img_width = 64
 
+# batch_size = 64
+# img_height = 512
+# img_width = 512
+
+#trainPath = "lessPaintings"
 trainPath = "paintings"
 
 # Content layer where will pull our feature maps
@@ -30,6 +30,19 @@ style_layers = ['block1_conv1',
                 'block4_conv1', 
                 'block5_conv1'
                ]
+
+# Last block of layers
+block5 = [
+          'block5_conv1',
+          'block5_conv2', 
+          'block5_conv3', 
+          'block5_conv4'
+          ]
+
+a_couple_style_layers = [
+    'block4_conv1', 
+    'block5_conv1'
+    ]          
 
 classes = os.listdir(trainPath)
 num_classes = len(classes)
@@ -45,7 +58,7 @@ train_datagen = ImageDataGenerator(
 train_generator = train_datagen.flow_from_directory(
     trainPath,
     target_size=(img_height, img_width),
-    batch_size=20,
+    batch_size=batch_size,
     classes=classes,
     class_mode='categorical',
     subset='training'
@@ -53,11 +66,16 @@ train_generator = train_datagen.flow_from_directory(
 validation_generator = train_datagen.flow_from_directory(
     trainPath,
     target_size=(img_height, img_width),
-    batch_size=20,
+    batch_size=batch_size,
     classes=classes,
     class_mode='categorical',
     subset='validation'
 )
+
+checkpoint = tf.keras.callbacks.ModelCheckpoint(
+    "PaintingClassifier.hdf5", monitor='val_loss', verbose=1,
+    save_best_only=True, save_weights_only=False)
+
 
 # add an input layer
 i = Input([img_height, img_width, 3])
@@ -69,6 +87,7 @@ base_model.trainable = False
 x = base_model(x)
 x = tf.keras.layers.MaxPooling2D(pool_size = 2)(x)
 x = tf.keras.layers.Flatten()(x)
+x = tf.keras.layers.Dropout(0.5)(x)
 x = tf.keras.layers.Dense(256)(x)
 x = tf.keras.layers.Dense(256)(x)
 predictions = Dense(len(classes), activation='softmax')(x)
@@ -81,35 +100,49 @@ model = Model(inputs=i, outputs=predictions)
 
 model.summary()
 
-model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['accuracy'])
-
-checkpoint = tf.keras.callbacks.ModelCheckpoint(
-    "PaintingClassifier.hdf5", monitor='val_loss', verbose=1,
-    save_best_only=True, save_weights_only=False)
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), 
+    loss='categorical_crossentropy', 
+    metrics=['accuracy']
+    )
 
 model.fit(
     x=train_generator,
-    steps_per_epoch=20,
+    steps_per_epoch=10,
+    #batch_size=batch_size,
     validation_data=validation_generator,
-    validation_steps=10,
-    epochs=20,
+    validation_steps=1,
+    epochs=10,
     callbacks=[checkpoint])
 
-model.save("PaintingClassifier.hdf5")
+# load the model because the last one might not be the best.
+model = load_model("PaintingClassifier.hdf5")
 
-# set style layers to trainable
-for name in style_layers:
-  model.get_layer("vgg19").get_layer(name).trainable = True
+
+model.trainable = True
+
+# for layer in model.get_layer("vgg19").layers:
+#     if layer.name in style_layers:
+#         layer.trainable = True
+#     else:
+#         layer.trainable = False
 
 model.summary()
 
-model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['accuracy'])
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.00001), 
+    loss='categorical_crossentropy', 
+    metrics=['accuracy']
+    )
 model.fit(
     x=train_generator,
-    steps_per_epoch=20,
+    steps_per_epoch=10,
+    #batch_size=batch_size,
     validation_data=validation_generator,
     validation_steps=10,
-    epochs=20,
+    epochs=10,
     callbacks=[checkpoint])
-  
+
+# load the model because the last one might not be the best.
+model = load_model("PaintingClassifier.hdf5")
 model.get_layer("vgg19").save("PaintingVgg19.hdf5")

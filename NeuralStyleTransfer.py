@@ -1,42 +1,23 @@
 import os
-img_dir = '/tmp/nst'
-if not os.path.exists(img_dir):
-    os.makedirs(img_dir)
-#!wget --quiet -P /tmp/nst/ https://upload.wikimedia.org/wikipedia/commons/d/d7/Green_Sea_Turtle_grazing_seagrass.jpg
-#!wget --quiet -P /tmp/nst/ https://upload.wikimedia.org/wikipedia/commons/0/0a/The_Great_Wave_off_Kanagawa.jpg
-#!wget --quiet -P /tmp/nst/ https://upload.wikimedia.org/wikipedia/commons/b/b4/Vassily_Kandinsky%2C_1913_-_Composition_7.jpg
-#!wget --quiet -P /tmp/nst/ https://upload.wikimedia.org/wikipedia/commons/0/00/Tuebingen_Neckarfront.jpg
-#!wget --quiet -P /tmp/nst/ https://upload.wikimedia.org/wikipedia/commons/6/68/Pillars_of_creation_2014_HST_WFC3-UVIS_full-res_denoised.jpg
-#!wget --quiet -P /tmp/nst/ https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/1024px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg
-
-#import matplotlib.pyplot as plt
-#import matplotlib as mpl
-#mpl.rcParams['figure.figsize'] = (10,10)
-#mpl.rcParams['axes.grid'] = False
-
-import numpy as np
-from PIL import Image
 import time
-import functools
+
 import cv2
-
-#%tensorflow_version 1.x
+import numpy as np
 import tensorflow as tf
-
-from tensorflow.python.keras.preprocessing import image as kp_image
-from tensorflow.python.keras import models 
-from tensorflow.python.keras import losses
-from tensorflow.python.keras import layers
+from PIL import Image
 from tensorflow.python.keras import backend as K
+from tensorflow.python.keras import models
+from tensorflow.python.keras.preprocessing import image as kp_image
+from tensorflow.keras.models import load_model
 
 #tf.enable_eager_execution()
 print("Eager execution: {}".format(tf.executing_eagerly()))
 
 # Set up some global values here
 #content_path = 'Green_Sea_Turtle_grazing_seagrass.jpg'
-content_path = '13921 Holyoke.jpg'
+content_path = 'C:\\Users\\stdeeds\\source\\repos\\SuperResolution\\input\\hide\\Man1.png'
 #style_path = 'painting.png'
-style_path = 'paintings\Alfred_Sisley\Alfred_Sisley_168.jpg'
+style_path = 'C:\\Users\\stdeeds\\source\\repos\\SuperResolution\\input\\ffhq (Flicker Faces High Quality)\\00016.png'
 
 # Content layer where will pull our feature maps
 content_layers = ['block5_conv2'] 
@@ -52,9 +33,12 @@ style_layers = ['block1_conv1',
 num_content_layers = len(content_layers)
 num_style_layers = len(style_layers)
 
+initial_variation_score = 0
+
 def load_img(path_to_img):
+  #max_dim = 512
   max_dim = 512
-  img = Image.open(path_to_img)
+  img = Image.open(path_to_img).convert('RGB')
   #open_cv_image = np.array(img)
   #open_cv_image = cv2.cvtColor(open_cv_image,cv2.COLOR_RGB2LAB)
   #img = Image.fromarray(open_cv_image)
@@ -114,6 +98,7 @@ def get_model():
   """
   # Load our model. We load pretrained VGG, trained on imagenet data
   vgg = tf.keras.applications.vgg19.VGG19(include_top=False, weights='imagenet')
+  #vgg = load_model("PaintingVgg19.hdf5")
   vgg.trainable = False
   # Get output layers corresponding to style and content layers 
   style_outputs = [vgg.get_layer(name).output for name in style_layers]
@@ -189,7 +174,7 @@ def compute_loss(model, loss_weights, init_image, gram_style_features, content_f
   Returns:
     returns the total loss, style loss, content loss, and total variational loss
   """
-  style_weight, content_weight = loss_weights
+  style_weight, content_weight, variation_weight = loss_weights
   
   # Feed our init image through our model. This will give us the content and 
   # style representations at our desired layers. Since we're using eager
@@ -214,27 +199,39 @@ def compute_loss(model, loss_weights, init_image, gram_style_features, content_f
     content_score += weight_per_content_layer* get_content_loss(comb_content[0], target_content)
   
   style_score *= style_weight
+  sScore=float(style_score)
   content_score *= content_weight
+  cScore=float(content_score)
+  # for the variation score, the target is the same as the input image.
+  variation_score = tf.image.total_variation(init_image)[0] * variation_weight
+  global initial_variation_score
+  if initial_variation_score == 0:
+    initial_variation_score = variation_score
+  variation_score -= initial_variation_score
+  if variation_score < 0:
+    variation_score = 0
+  vScore=float(variation_score)
+
 
   # Get total loss
-  loss = style_score*5 + content_score 
-  loss += tf.image.total_variation(init_image)[0] * 0.01 # at 1x the smallest texture is 2x2 pixels
-  return loss, style_score, content_score
+  loss = style_score + content_score + variation_score
+  return loss, style_score, content_score, variation_score
 
 def compute_grads(cfg):
   with tf.GradientTape() as tape: 
-    all_loss = compute_loss(**cfg)
+    all_loss = compute_loss(**cfg) # 3 seconds
   # Compute gradients wrt input image
   total_loss = all_loss[0]
-  return tape.gradient(total_loss, cfg['init_image']), all_loss
+  return tape.gradient(total_loss, cfg['init_image']), all_loss # 8 seconds
 
 #import IPython.display
 
 def run_style_transfer(content_path, 
                        style_path,
-                       num_iterations=5000,
+                       num_iterations=2000,
                        content_weight=1e3, 
-                       style_weight=1e-2): 
+                       style_weight=1e-2,
+                       variation_weight=1e-3): 
   # We don't need to (or want to) train any layers of our model, so we set their
   # trainable to false. 
   model = get_model() 
@@ -259,7 +256,7 @@ def run_style_transfer(content_path,
   best_loss, best_img = float('inf'), None
   
   # Create a nice config 
-  loss_weights = (style_weight, content_weight)
+  loss_weights = (style_weight, content_weight, variation_weight)
   cfg = {
       'model': model,
       'loss_weights': loss_weights,
@@ -282,8 +279,8 @@ def run_style_transfer(content_path,
   
   imgs = []
   for i in range(num_iterations):
-    grads, all_loss = compute_grads(cfg)
-    loss, style_score, content_score = all_loss
+    grads, all_loss = compute_grads(cfg) # 11 seconds
+    loss, style_score, content_score, variation_score = all_loss
     opt.apply_gradients([(grads, init_image)])
     clipped = tf.clip_by_value(init_image, min_vals, max_vals)
     init_image.assign(clipped)
@@ -310,7 +307,8 @@ def run_style_transfer(content_path,
       print('Total loss: {:.4e}, ' 
             'style loss: {:.4e}, '
             'content loss: {:.4e}, '
-            'time: {:.4f}s'.format(loss, style_score, content_score, time.time() - start_time))
+            'variation loss: {:.4e}, '
+            'time: {:.4f}s'.format(loss, style_score, content_score, variation_score, time.time() - start_time))
   print('Total time: {:.4f}s'.format(time.time() - global_start))
   #IPython.display.clear_output(wait=True)
 #   plt.figure(figsize=(14,4))
